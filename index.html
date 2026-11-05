@@ -53,11 +53,13 @@ const KEY='drevo-pw';
 function store(k,v){try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}}
 function load(k){try{return localStorage.getItem(k)}catch(e){return null}}
 async function unlock(pw){
-  const meta=await (await fetch('meta.json',{cache:'no-cache'}).catch(()=>caches.match('meta.json'))).json();
-  const data=await (await fetch('data.bin')).arrayBuffer();
+  let res;try{res=await fetch('data.bin',{cache:'no-cache'})}catch(e){res=await caches.match('data.bin')}
+  const buf=new Uint8Array(await res.arrayBuffer());
+  if(String.fromCharCode(...buf.slice(0,4))!=='DRV1')throw new Error('файл повреждён');
+  const salt=buf.slice(4,20),iv=buf.slice(20,32),it=new DataView(buf.buffer,32,4).getUint32(0),data=buf.slice(36);
   const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
-  const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:hex(meta.salt),iterations:meta.it,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
-  const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:hex(meta.iv)},key,data);
+  const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:it,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
+  const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,data);
   const stream=new Blob([plain]).stream().pipeThrough(new DecompressionStream('gzip'));
   return await new Response(stream).text();
 }
